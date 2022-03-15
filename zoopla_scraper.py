@@ -2,7 +2,7 @@ import requests
 from bs4 import BeautifulSoup
 from sqlalchemy import create_engine
 from db import make_db_connection
-import re
+import re 
 
 class Flat:
     def __init__(self, listing_id, price, address, zip_code, num_bedrooms, num_bathrooms, num_liv_rooms, 
@@ -104,7 +104,26 @@ def process_price(price):
 
 def get_zip_code(full_address):
     res = re.search('G\d(.*)$', full_address)
+
+    # regular expression failed, split the string
+    if res is None:
+        split_address = full_address.split(',')
+
+        if len(split_address) < 3:
+            # zip code present but at a sooner index
+            return split_address[1].strip().split(' ')[1]
+
+        zip_code_with_city = split_address[2].strip().split(' ')
+
+        if len(zip_code_with_city) < 2:
+            # missing zipcode
+            return ''
+
+        return split_address[2].strip().split(' ')[1]
+
     return res.group()
+    
+    
 
 
 def insert_flat_sale_listings_into_db(flats, mydb):
@@ -129,7 +148,7 @@ def process_id(listing_id):
 
 def main():
     flats = []
-    num_pages=50
+    num_pages=31
     for i in range(1, num_pages+1):
         URL = f'https://www.zoopla.co.uk/for-sale/property/glasgow/?beds_min=1&page_size=25&q=Glasgow&radius=5&results_sort=newest_listings&search_source=refine&pn={i}'
         listings = get_sale_listings_from_url(URL)

@@ -34,17 +34,20 @@ class Flat:
             self.listed_on, self.listed_by, self.sq_ft)
 
 
-def parse_flat_sale_listings(listings, flats):
-
+def parse_flat_listings(listings, flats, category):
     for listing in listings:
         price_with_description = listing.find(attrs={'data-testid': 'listing-price'})
 
         if (len(price_with_description) != 2):
             continue
         
-        price_description = price_with_description.contents[0].text
-        price = price_with_description.contents[1].text
-        price = process_price(price)
+        if category == 'sale':
+            price_description = price_with_description.contents[0].text
+            price = price_with_description.contents[1].text
+            price = process_sale_price(price)
+        elif category == 'rental':
+            price_description = ''
+            price = process_rental_price(price_with_description)
 
         listing_id = process_id(listing.parent['id'])
         description = listing.find(attrs={'data-testid': 'listing-title'}).text
@@ -75,12 +78,28 @@ def parse_flat_sale_listings(listings, flats):
     return flats
 
 
+def get_listings_from_db(mydb, category):
+    cursor = mydb.cursor()
+    if category == 'sale':
+        cursor.execute("SELECT listing_id FROM ZooplaSales")
+    elif category == 'rental':
+        cursor.execute("SELECT listing_id FROM ZooplaRentals")
+    db_listing_ids = cursor.fetchall()
+
+    return db_listing_ids
+
+
+def filter_listings(new_flats, mydb, category):
+    old_listing_ids = get_listings_from_db(mydb, category)
+    old_listing_ids = [listing_id[0] for listing_id in old_listing_ids]
+    new_flats = [flat for flat in new_flats if int(flat.listing_id) not in old_listing_ids]
+    return new_flats
+
+
 def get_sale_listings_from_url(URL):
     page = requests.get(URL)
     soup = BeautifulSoup(page.content, 'html.parser')
-    # dependent on the page layout
-    listings = soup.find_all(attrs={'data-testid': 'search-result'})
-    
+    listings = soup.find_all(attrs={'data-testid': 'search-result'})    
     return listings
 
 
@@ -97,10 +116,15 @@ def preprocess_price_string(price):
     split_price = price.strip()[1:].split(',')
     return float(split_price[0] + split_price[1])
 
-
-def process_price(price):
+def process_sale_price(price):
     return float(price.strip()[1:].split(',')[0] + price.strip()[1:].split(',')[1])
 
+def process_rental_price(price_with_description):
+    price = price_with_description.p.text.split(' ')[0][1:]
+    if ',' in price:
+        price = price.split(',')[0] + price.split(',')[1]
+    
+    return float(price)
 
 def get_zip_code(full_address):
     res = re.search('G\d(.*)$', full_address)
@@ -122,41 +146,51 @@ def get_zip_code(full_address):
         return split_address[2].strip().split(' ')[1]
 
     return res.group()
-    
-    
 
-
-def insert_flat_sale_listings_into_db(flats, mydb):
+def insert_flat_listings_into_db(flats, mydb, category):
     cursor = mydb.cursor()
-    sql_query = "INSERT INTO ZooplaSales VALUES (%s, %s, %s, %s, %s, %s, \
-                                                 %s, %s, %s, %s, %s, %s, %s)"
+    if category == 'rental':
+        sql_query = "INSERT INTO ZooplaRentals VALUES (%s, %s, %s, %s, %s, %s, \
+                                                    %s, %s, %s, %s, %s, %s, %s)"
+    elif category == 'sale':
+        sql_query = "INSERT INTO ZooplaSales VALUES (%s, %s, %s, %s, %s, %s, \
+                                                    %s, %s, %s, %s, %s, %s, %s)"
     flats_records = [flat.to_tuple() for flat in flats]
     cursor.executemany(sql_query, flats_records)
     mydb.commit()
 
-
 def process_date(date):
     date_list = date.text.split(' ')[2:]
     date = ' '.join(map(str, date_list))
-
     return date
 
 def process_id(listing_id):
     return listing_id[8:]
 
+def get_url(category, page):
+    if category == 'sale':
+        return f'https://www.zoopla.co.uk/for-sale/property/glasgow/?beds_min=1&page_size=25&q=Glasgow&radius=0&results_sort=newest_listings&search_source=refine&pn={page}'
+    elif category == 'rental':
+        return f'https://www.zoopla.co.uk/to-rent/property/glasgow/?beds_min=1&price_frequency=per_month&q=Glasgow&results_sort=newest_listings&search_source=to-rent&pn={page}'
 
 
 def main():
     flats = []
-    num_pages=31
-    for i in range(1, num_pages+1):
-        URL = f'https://www.zoopla.co.uk/for-sale/property/glasgow/?beds_min=1&page_size=25&q=Glasgow&radius=5&results_sort=newest_listings&search_source=refine&pn={i}'
+    num_pages=30
+    category = 'sale'
+    mydb = make_db_connection()
+
+    for page_num in range(1, num_pages+1):
+        URL = get_url(category, page_num)
         listings = get_sale_listings_from_url(URL)
-        flats = parse_flat_sale_listings(listings, flats)
-        print(f'Page {i} processed')
+        flats = parse_flat_listings(listings, flats, category)    
+        print(f'Page {page_num} processed')
+
+    new_flats = filter_listings(flats, mydb, category)
 
     print(f'Length of flats: {len(flats)}')
-    mydb = make_db_connection()
-    insert_flat_sale_listings_into_db(flats, mydb)
+    print(f'Length of new flats: {len(new_flats)}')   
+
+    insert_flat_listings_into_db(new_flats, mydb, category)
 
 main()

@@ -173,11 +173,18 @@ def get_url(category, page):
     elif category == 'rental':
         return f'https://www.zoopla.co.uk/to-rent/property/glasgow/?beds_min=1&price_frequency=per_month&q=Glasgow&results_sort=newest_listings&search_source=to-rent&pn={page}'
 
+def get_num_pages():
+    num_pages = input("Enter number of pages to scrape: ")
+    return int(num_pages)
+
+def get_category():
+    category = input("Enter category ('sale' or 'rental'): ")
+    return category
 
 def main():
     flats = []
-    num_pages=30
-    category = 'sale'
+    num_pages=get_num_pages()
+    category = get_category()
     mydb = make_db_connection()
 
     for page_num in range(1, num_pages+1):
@@ -193,4 +200,5 @@ def main():
 
     insert_flat_listings_into_db(new_flats, mydb, category)
 
-main()
+if __name__ == "__main__":
+    main()
